@@ -12,6 +12,7 @@
     "@google-cloud/storage": "^7.6.0",
     "aws-sdk": "^2.1502.0",
     "axios": "^1.6.2",
+    "jszip": "^3.10.1",
     "uuid": "^9.0.1"
   }
 }

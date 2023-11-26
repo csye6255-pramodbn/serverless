@@ -1,8 +1,25 @@
 const fs = require('fs');
 const axios = require('axios');
 const { Storage } = require('@google-cloud/storage');
+const JSZip = require("jszip");
 const AWS = require('aws-sdk');
 const { v4: uuidv4 } = require('uuid');
+
+const counts = {};
+
+// Function to generate a unique local and destination blob name using a counter
+function generateFileNames(name) {
+    if (!counts[name]) {
+        counts[name] = 1; // Initialize counter for new name
+    }
+    let counter = counts[name]; // Get current counter for name
+    let uniqueFileName = `${name}_${counter}.zip`;
+    counts[name]++; // Increment counter for the name
+    return {
+        localPath: `/tmp/${uniqueFileName}`,
+        destinationBlobName: `${name}/${uniqueFileName}`
+    };
+}
 
 // Function to Download file from URL
 async function downloadFile(url, localPath) {
@@ -18,6 +35,22 @@ async function downloadFile(url, localPath) {
         fileStream.on('finish', () => resolve(true));
         fileStream.on('error', (error) => reject(error));
     });
+}
+
+
+async function isZipEmpty(zipPath) {
+    const data = fs.readFileSync(zipPath);
+    const zip = await JSZip.loadAsync(data);
+    const fileNames = Object.keys(zip.files);
+
+    for (let fileName of fileNames) {
+        const fileData = await zip.files[fileName].async("nodebuffer");
+        if (fileData.length > 0) {
+            return false; // Found a file that is not empty
+        }
+    }
+
+    return true; // All files in the zip are empty, or the zip itself is empty
 }
 
 // Function to Upload file to GCP Bucket
@@ -98,28 +131,44 @@ async function lambdaHandler(event, context) {
     // Decode GCP Credentials
     const gcpCredentialsJson = Buffer.from(gcpCredentialsBase64, 'base64').toString('utf-8');
     const credentials = JSON.parse(gcpCredentialsJson);
-
-    let uniqueId = uuidv4(); // Generate a unique ID for the file
-    let localPath = `/tmp/${name}_${uniqueId}.zip`; // Local Path to store the downloaded file /tmp in Lambda
-    let destinationBlobName = `${name}_${uniqueId}.zip`; // Destination Blob Name in GCP Bucket
-
-    // Download the file from URL and upload it to GCP Bucket, then send a success email to the user, and log the success event in DynamoDB
+    const { localPath, destinationBlobName } = generateFileNames(name);
+    
     try {
         const downloadSuccess = await downloadFile(url, localPath);
+        const stats = fs.statSync(localPath);
+        console.log("file size",stats.size);
+        console.log("download status",downloadSuccess);
         if (downloadSuccess) {
-            await uploadToGCP(bucketName, localPath, destinationBlobName, credentials);
-            const emailSubject = "Assignment Download and Upload Successful";
-            const emailBody = `Hello ${name},\n\nThe Assignment has been successfully downloaded and uploaded to GCP Bucket.\n\nBest Regards,\nPramod Cloud`;
-            await sendEmail(sesClient, recipient, emailSubject, emailBody);
-            await logEmailEvent(dynamoDB, tableName, name, recipient, "Success", "File downloaded and uploaded successfully");
+            console.log("inside block");
+            const isZipContentEmpty = await isZipEmpty(localPath);
+            console.log("isZipEmtpy",isZipContentEmpty);
+            if (isZipContentEmpty==false){
+                console.log("Files not zero bytes");
+                await uploadToGCP(bucketName, localPath, destinationBlobName, credentials);
+                const emailSubject = "Assignment Download and Upload Successful";
+                const emailBody = `Hello ${name},\n\nThe Assignment has been successfully downloaded and uploaded to GCP Bucket.\n\nBest Regards,\nPramod Cloud`;
+                await sendEmail(sesClient, recipient, emailSubject, emailBody);
+                await logEmailEvent(dynamoDB, tableName, name, recipient, "Success", "File downloaded and uploaded successfully");
+            } else if (isZipContentEmpty==true){
+                console.log("Files  zero bytes");
+                throw new Error("Empty File");
+            }
+          
+
         }
     // If there is an error in downloading the file, send an email to the user to resubmit, and log the failure event in DynamoDB
     } catch (error) {
         console.error(`Error in processing: ${error}`);
-        const emailSubject = "Assignment Download Failed";
-        const emailBody = `Hello ${name},\n\nThere was an error downloading your assignment, please resubmit it.\n\nBest Regards,\nPramod Cloud`;
+        let emailSubject, emailBody;
+        if (error.message === "Empty File") {
+            emailSubject = 'Assignment Downloaded is Empty';
+            emailBody = `Hello ${name},\n\nYour assignment file appears to be empty. Please check and resubmit a valid file.\n\nBest Regards,\nPramod Cloud`;
+        } else {
+            emailSubject = "Assignment Download Failed";
+            emailBody = `Hello ${name},\n\nThere was an error downloading your assignment, please resubmit it.\n\nBest Regards,\nPramod Cloud`;
+        }
         await sendEmail(sesClient, recipient, emailSubject, emailBody);
-        await logEmailEvent(dynamoDB, tableName, name, recipient, "Failure", "Error in downloading the file");
+        await logEmailEvent(dynamoDB, tableName, name, recipient, "Failure", error.message);
     }
 
     return {

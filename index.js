@@ -165,7 +165,7 @@ async function lambdaHandler(event, context) {
             emailBody = `Hello ${name},\n\nYour assignment file appears to be empty. Please check and resubmit a valid file.\n\nBest Regards,\nPramod Cloud`;
         } else {
             emailSubject = "Assignment Download Failed";
-            emailBody = `Hello ${name},\n\nThere was an error downloading your assignment, please resubmit it.\n\nBest Regards,\nPramod Cloud`;
+            emailBody = `Hello ${name},\n\nThere was an error downloading your assignment, because of invalid link, please resubmit it.\n\nBest Regards,\nPramod Cloud`;
         }
         await sendEmail(sesClient, recipient, emailSubject, emailBody);
         await logEmailEvent(dynamoDB, tableName, name, recipient, "Failure", error.message);

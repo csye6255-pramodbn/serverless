@@ -146,11 +146,11 @@ async function lambdaHandler(event, context) {
                 console.log("Files not zero bytes");
                 await uploadToGCP(bucketName, localPath, destinationBlobName, credentials);
                 const emailSubject = "Assignment Download and Upload Successful";
-                const emailBody = `Hello ${name},\n\nThe Assignment has been successfully downloaded and uploaded to GCP Bucket.\n\nBest Regards,\nPramod Cloud`;
+                const emailBody = `Hello ${name},\n\nThe Assignment has been successfully downloaded and uploaded to GCP Bucket.\nYour submission path in GCS is gs://${bucketName}/${destinationBlobName}\n\nBest Regards,\nPramod Cloud`;
                 await sendEmail(sesClient, recipient, emailSubject, emailBody);
                 await logEmailEvent(dynamoDB, tableName, name, recipient, "Success", "File downloaded and uploaded successfully");
             } else if (isZipContentEmpty==true){
-                console.log("Files  zero bytes");
+                console.log("Files zero bytes");
                 throw new Error("Empty File");
             }
           
